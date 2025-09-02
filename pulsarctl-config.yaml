@@ -1,0 +1,6 @@
+webServiceURL: http://localhost:8081
+brokerServiceURL: pulsar://localhost:6650
+authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationToken
+authParams: token:eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.MG1ELUllbrhYNwpuLZpEcTeH_SfMJDTorGir7enh5Y4
+tlsAllowInsecureConnection: false
+tlsTrustCertsFilePath: ""

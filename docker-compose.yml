@@ -1,0 +1,143 @@
+networks:
+  pulsar:
+    driver: bridge
+
+services:
+  # Start zookeeper
+  zookeeper:
+    image: apachepulsar/pulsar:latest
+    container_name: zookeeper
+    restart: on-failure
+    networks:
+      - pulsar
+    environment:
+      - metadataStoreUrl=zk:zookeeper:2181
+      - PULSAR_MEM=-Xms256m -Xmx256m -XX:MaxDirectMemorySize=256m
+    volumes:
+      - ./data/zookeeper:/pulsar/data/zookeeper
+    command: >
+      bash -c "bin/apply-config-from-env.py conf/zookeeper.conf
+      && bin/generate-zookeeper-config.sh conf/zookeeper.conf
+      && exec bin/pulsar zookeeper"
+    healthcheck:
+      test: ["CMD", "bin/pulsar-zookeeper-ruok.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Initialize cluster metadata
+  pulsar-init:
+    container_name: pulsar-init
+    hostname: pulsar-init
+    image: apachepulsar/pulsar:latest
+    networks:
+      - pulsar
+    environment:
+      - metadataStoreUrl=zk:zookeeper:2181
+    command: >
+      bash -c "bin/pulsar initialize-cluster-metadata
+      --cluster cluster-a
+      --zookeeper zookeeper:2181
+      --configuration-store zookeeper:2181
+      --web-service-url http://broker:8080
+      --broker-service-url pulsar://broker:6650"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+  # Start bookie
+  bookie:
+    image: apachepulsar/pulsar:latest
+    container_name: bookie
+    restart: on-failure
+    networks:
+      - pulsar
+    environment:
+      - clusterName=cluster-a
+      - zkServers=zookeeper:2181
+      - metadataServiceUri=metadata-store:zk:zookeeper:2181
+      - advertisedAddress=bookie
+      - BOOKIE_MEM=-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      pulsar-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./data/bookkeeper:/pulsar/data/bookkeeper
+    command: >
+      bash -c "bin/apply-config-from-env.py conf/bookkeeper.conf
+      && exec bin/pulsar bookie"
+
+  # Start broker  
+  broker:
+    image: apachepulsar/pulsar:latest
+    container_name: broker
+    hostname: broker
+    restart: on-failure
+    networks:
+      - pulsar
+    environment:
+      - metadataStoreUrl=zk:zookeeper:2181
+      - zookeeperServers=zookeeper:2181
+      - clusterName=cluster-a
+      - managedLedgerDefaultEnsembleSize=1
+      - managedLedgerDefaultWriteQuorum=1
+      - managedLedgerDefaultAckQuorum=1
+      - advertisedAddress=broker
+      - advertisedListeners=external:pulsar://127.0.0.1:6650
+      - PULSAR_MEM=-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m
+      # Disable authentication for initial setup
+      - authenticationEnabled=false
+      - authorizationEnabled=false
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      bookie:
+        condition: service_started
+    volumes:
+      - ./conf/jwt/public.pem:/pulsar/jwt-public.pem:ro
+    ports:
+      - "6650:6650"
+      - "8081:8080"
+    command: >
+      bash -c "bin/apply-config-from-env.py conf/broker.conf
+      && exec bin/pulsar broker"
+
+  # PostgreSQL database for Pulsar Manager
+  postgres:
+    image: postgres:13
+    container_name: pulsar-postgres
+    restart: on-failure
+    networks:
+      - pulsar
+    environment:
+      - POSTGRES_DB=pulsar_manager
+      - POSTGRES_USER=pulsar
+      - POSTGRES_PASSWORD=pulsar123
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Pulsar manager
+  pulsar-manager:
+    image: apachepulsar/pulsar-manager:v0.4.0
+    container_name: pulsar-manager
+    restart: on-failure
+    networks:
+      - pulsar
+    environment:
+      - SPRING_CONFIGURATION_FILE=/pulsar-manager/pulsar-manager/application.properties
+      - ENV_REDIRECT_HOST=localhost
+      - ENV_REDIRECT_PORT=9527
+      - ENV_LOG_LEVEL=INFO
+    volumes:
+      - ./data/pulsar-manager:/pulsar-manager/pulsar-manager/dbdata
+    ports:
+      - "9527:9527"
+    depends_on:
+      - broker
+      - postgres
+    command: >
+      sh -c "bin/pulsar-manager"
