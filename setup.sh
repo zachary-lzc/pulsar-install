@@ -23,7 +23,8 @@ mkdir -p "$PROJECT_DIR/data/zookeeper" \
          "$PROJECT_DIR/conf/broker" \
          "$PROJECT_DIR/conf/postgres" \
          "$PROJECT_DIR/logs"
-
+## 授权文件夹         
+chmod -R 777 ./data/zookeeper
 # 步骤1: 生成JWT密钥和Token
 echo "🔐 步骤1: 生成JWT认证密钥和Token..."
 if [ ! -f "$PROJECT_DIR/conf/jwt-auth.env" ]; then
